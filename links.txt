@@ -1,0 +1,3 @@
+https://github.com/courselabs/kubernetes
+https://github.com/seifrajhi/Kubernetes-practical-exercises-Hands-on
+https://medium.com/mrdevsecops/kubernetes-tutorials-1feafa6edb50
