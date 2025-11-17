@@ -440,24 +440,46 @@ kubectl logs mypod
 kubectl create namespace dev
 ```
 
-2) Apply the manifest `manifests/mypod.yaml`.
+2) Create a Pod using only CLI arguments (no manifest).
+```
+kubectl run mypod-cli --image=nginx:stable-alpine --port=80 --restart=Never --labels=app=mypod-cli
+```
+
+3) Alternatively, create the Pod using a manifest.
+
+Save as manifests/mypod.yaml:
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mypod
+spec:
+  containers:
+  - name: nginx
+    image: nginx:stable-alpine
+    ports:
+    - containerPort: 80
+```
+
+Apply the manifest:
 ```
 kubectl apply -f manifests/mypod.yaml
 ```
 
-3) Get the yaml output of the created pod `mypod`.
+4) Get the yaml output of the created Pod (manifest-based).
 ```
 kubectl get pod mypod -o yaml
 ```
 
-4) Describe the pod `mypod`.
+5) Describe the Pod.
 ```
 kubectl describe pod mypod
 ```
 
-5) Clean up the pod by deleting it.
+6) Clean up.
 ```
 kubectl delete pod mypod
+kubectl delete pod mypod-cli
 ```
 
 ---
@@ -683,6 +705,312 @@ You should see the "Welcome to nginx!" page.
 [Back to Index](#index)
 
 ---
+## Extra Hands‑on: Create Kubernetes resources with kubectl (imperative, no YAML)
+
+Notes
+- All examples use the dev namespace; append -n dev if your current namespace differs.
+- Each resource shows at least two creation variants and a brief beginner‑friendly explanation.
+
+### Namespace
+- Variant A
+  ```
+  kubectl create namespace dev
+  ```
+  Creates a logical grouping to isolate resources.
+
+- Variant B
+  ```
+  kubectl create ns demo
+  ```
+  Shorthand for the same operation.
+
+Verify
+```
+kubectl get ns
+```
+
+### Pod
+- Variant A (single container)
+  ```
+  kubectl run web-pod --image=nginx:alpine --port=80 --labels=app=web -n dev --restart=Never
+  ```
+  Creates one Pod that runs nginx. --restart=Never ensures it is a Pod, not a controller.
+
+- Variant B (command Pod)
+  ```
+  kubectl run toolbox --image=busybox:1.36 -n dev --restart=Never --command -- sh -c "sleep 3600"
+  ```
+  Runs a simple container with a custom command (sleep).
+
+Verify
+```
+kubectl get pods -n dev
+```
+
+### Deployment
+- Variant A (basic)
+  ```
+  kubectl create deployment web --image=nginx:1.25 -n dev --replicas=2
+  ```
+  Creates a controller that keeps 2 identical Pods running.
+
+- Variant B (with env and update)
+  ```
+  kubectl create deployment api --image=httpd:2.4 -n dev
+  kubectl set env deployment/api APP_ENV=dev -n dev
+  kubectl scale deployment/api --replicas=3 -n dev
+  ```
+  Adds environment variables and scales the Deployment.
+
+Verify
+```
+kubectl get deploy -n dev
+```
+
+### Service
+- Variant A (expose a Deployment)
+  ```
+  kubectl expose deployment web --name=web-svc --port=80 --target-port=80 -n dev --type=ClusterIP
+  ```
+  Creates an internal stable endpoint to reach Pods behind web.
+
+- Variant B (NodePort)
+  ```
+  kubectl create service nodeport web-node --tcp=80:80 -n dev --node-port=30080
+  ```
+  Opens a port on each node for external access in lab setups.
+
+Verify
+```
+kubectl get svc -n dev
+```
+
+### Ingress
+Requires an Ingress controller in the cluster.
+
+- Variant A (simple host rule)
+  ```
+  kubectl create ingress web-ing -n dev --rule="example.local/*=web-svc:80"
+  ```
+  Routes HTTP requests for example.local to web-svc:80.
+
+- Variant B (class + path prefix)
+  ```
+  kubectl create ingress web-ing-path -n dev --class=nginx --rule="example.local/web*=web-svc:80"
+  ```
+  Uses a specific controller class and routes only /web paths.
+
+Verify
+```
+kubectl get ingress -n dev
+```
+
+### ConfigMap
+- Variant A (literals)
+  ```
+  kubectl create configmap app-config -n dev \
+    --from-literal=LOG_LEVEL=info --from-literal=FEATURE_X=true
+  ```
+  Stores non‑secret key/values.
+
+- Variant B (from files)
+  ```
+  printf "max_conn=200\n" > app.ini
+  kubectl create configmap app-files -n dev --from-file=app.ini
+  ```
+  Populates from local files.
+
+Verify
+```
+kubectl get configmap -n dev
+```
+
+### Secret
+- Variant A (generic literals)
+  ```
+  kubectl create secret generic app-secret -n dev \
+    --from-literal=DB_USER=demo --from-literal=DB_PASS=s3cr3t
+  ```
+  Stores sensitive data base64‑encoded.
+
+- Variant B (Docker registry)
+  ```
+  kubectl create secret docker-registry regcred -n dev \
+    --docker-server=registry.example.com --docker-username=user \
+    --docker-password='p@ssw0rd' --docker-email=user@example.com
+  ```
+  Lets Pods pull private images.
+
+Verify
+```
+kubectl get secret -n dev
+```
+
+### ServiceAccount
+- Variant A
+  ```
+  kubectl create serviceaccount build-bot -n dev
+  ```
+  Identity for Pods to talk to the API securely.
+
+- Variant B
+  ```
+  kubectl create sa reader -n dev
+  ```
+  Another identity for RBAC bindings.
+
+Verify
+```
+kubectl get sa -n dev
+```
+
+### RBAC (Role, RoleBinding, ClusterRoleBinding)
+- Variant A (namespace‑scoped read on Pods)
+  ```
+  kubectl create role pod-reader -n dev --verb=get,list,watch --resource=pods
+  kubectl create rolebinding read-pods -n dev --role=pod-reader --serviceaccount=dev:reader
+  ```
+  Grants the reader ServiceAccount read access to Pods in dev.
+
+- Variant B (edit ConfigMaps via a different SA)
+  ```
+  kubectl create role cm-editor -n dev --verb=get,update --resource=configmaps
+  kubectl create rolebinding edit-cm -n dev --role=cm-editor --serviceaccount=dev:build-bot
+  ```
+  Grants limited edit permissions.
+
+- Cluster‑wide binding example
+  ```
+  kubectl create clusterrolebinding view-dev --clusterrole=view --serviceaccount=dev:reader
+  ```
+  Gives the reader ServiceAccount the builtin view role cluster‑wide.
+
+Verify
+```
+kubectl auth can-i list pods --as=system:serviceaccount:dev:reader -n dev
+```
+
+### Job
+- Variant A (compute π)
+  ```
+  kubectl create job pi -n dev --image=perl -- perl -Mbignum=bpi -wle 'print bpi(2000)'
+  ```
+  Runs to completion once.
+
+- Variant B (short task)
+  ```
+  kubectl create job hello -n dev --image=busybox -- sh -c 'echo hi; sleep 2'
+  ```
+  One‑off command job.
+
+Verify
+```
+kubectl get jobs -n dev
+kubectl logs job/pi -n dev
+```
+
+### CronJob
+- Variant A (every minute)
+  ```
+  kubectl create cronjob hello -n dev --image=busybox --schedule="*/1 * * * *" -- sh -c 'date; echo hello'
+  ```
+  Schedules a repeating job.
+
+- Variant B (every 5 minutes)
+  ```
+  kubectl create cronjob curl-site -n dev --image=curlimages/curl --schedule="*/5 * * * *" -- curl -s https://example.com || true
+  ```
+  Periodically runs a check.
+
+Verify
+```
+kubectl get cronjobs -n dev
+```
+
+### DaemonSet
+- Variant A (one Pod per node)
+  ```
+  kubectl create daemonset node-logger -n dev --image=busybox -- sh -c 'sleep 3600'
+  ```
+  Ensures a Pod runs on every node.
+
+- Variant B (with label)
+  ```
+  kubectl create daemonset probe -n dev --image=busybox --labels=app=probe -- sh -c 'sleep 3600'
+  ```
+  Same pattern with labels for selection.
+
+Verify
+```
+kubectl get ds -n dev
+```
+
+### PersistentVolumeClaim
+Storage class and access modes depend on your cluster.
+
+- Variant A (simple 1Gi claim)
+  ```
+  kubectl create pvc data-claim -n dev --storage=1Gi --access-modes=ReadWriteOnce
+  ```
+  Requests 1Gi; may stay Pending until a PV is provisioned.
+
+- Variant B (with storage class)
+  ```
+  kubectl create pvc fast-claim -n dev --storage=5Gi --access-modes=ReadWriteOnce --storage-class=standard
+  ```
+  Targets a specific StorageClass.
+
+Verify
+```
+kubectl get pvc -n dev
+```
+
+### StatefulSet (requires a headless Service)
+- Variant A (nginx with headless service)
+  ```
+  kubectl create service clusterip web-headless -n dev --tcp=80:80 --cluster-ip=None
+  kubectl create statefulset web -n dev --image=nginx:alpine --port=80 --replicas=2 --service=web-headless
+  ```
+  Creates stable Pod identities (web-0, web-1) tied to DNS.
+
+- Variant B (redis with headless service)
+  ```
+  kubectl create service clusterip redis-hl -n dev --tcp=6379:6379 --cluster-ip=None
+  kubectl create statefulset redis -n dev --image=redis:7 --port=6379 --replicas=2 --service=redis-hl
+  ```
+  Typical stateful workload pattern.
+
+Verify
+```
+kubectl get sts,pods -n dev
+```
+
+### Horizontal Pod Autoscaler (HPA)
+Requires metrics server.
+
+- Variant A (autoscale web)
+  ```
+  kubectl autoscale deployment web -n dev --min=2 --max=5 --cpu-percent=70
+  ```
+  Scales based on CPU usage.
+
+- Variant B (autoscale api)
+  ```
+  kubectl autoscale deployment api -n dev --min=1 --max=4 --cpu-percent=50
+  ```
+
+Verify
+```
+kubectl get hpa -n dev
+```
+
+### Optional cleanup (pick what you created)
+```
+kubectl delete all --all -n dev
+kubectl delete ingress --all -n dev
+kubectl delete pvc --all -n dev
+kubectl delete role,rolebinding,clusterrolebinding --all -n dev --ignore-not-found
+```
 ---
 
 ## Cleaning up
