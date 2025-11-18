@@ -184,8 +184,8 @@ kubectl get pods -o wide whoami
 
 The sleep Pod container has cURL installed, which you can use to make a request to the HTTP server in the whoami Pod. We'll store the IP address in a variable to make the commands easier:
 
-```powershell
-$ip = kubectl get pod whoami -o jsonpath='{.status.podIP}'
+```bash
+ip=$(kubectl get pod whoami -o jsonpath='{.status.podIP}')
 echo "whoami pod IP address: $ip"
 kubectl exec sleep -- curl -s $ip
 ```
